@@ -24,5 +24,5 @@ rasterList = [
 for raster in rasterList:
     print("Converting feature", raster[0], "to raster", raster[1])
     arcpy.Delete_management(raster[1])
-    arcpy.conversion.FeatureToRaster(raster[0], raster[2], raster[1], 10)
+    arcpy.conversion.FeatureToRaster(raster[0], raster[2], raster[1], 50)
 

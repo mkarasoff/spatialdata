@@ -1,5 +1,6 @@
 import arcpy
 import os
+import re
 import sys
 
 try:
@@ -13,36 +14,54 @@ print(arcpy.env.workspace)
 layerCfgs = {
     'UnsuitableAreas': 
         ['AirportCompatibilityZoneA', 'PrimeFarmland', 'MeadowfoamPreserve', 'CriticalHabitat', 'TribalLands',
-         'Waterbodies', 'State_Federal_TribalLands', 'UrbanResidentialZones'],
+         'Waterbodies', 'State_Federal_TribalLands', 'UrbanResidentialZones', 'ButteCountyBoundary'],
     'Farmland': 
-        ['GrazingLands', 'PrimeFarmland'],
+        ['GrazingLands', 'PrimeFarmland', 'ButteCountyBoundary'],
     'ConstrainedAreas':
         ['Williamson_Act_Parcels',  'NonUrban_ResidentialParcels_Lessthan20Acres', 'Parcels_Industrial_CommercialUse',
          'AirportCompatibilityZones_BthroughD_Diss', 'ScenicHighwayOverlayZone',
          'OakWoodlands', 'DeerHerdOverlay', 'Wetlands_revised', 'FloodHazard_HundredYr', 'SevereErosionHazardAreas',
-         'FireHazardZones_High_and_VeryHighZones'],
-    'ConstrainedBuffers':
-        ['ResidentialProximity', 'GeneralPlan_Identified_ScenicHighways'],
+         'FireHazardZones_High_and_VeryHighZones', 'ButteCountyBoundary'],
+    'GeneralPlan_Identified_ScenicHighways':
+        ['GeneralPlan_Identified_ScenicHighways', 'ButteCountyBoundary'],
+    'ResidentialProximity':
+        ['ResidentialProximity', 'ButteCountyBoundary'],
     'ParcelSize':
         ['NonUrban_ResidentialParcels_Lessthan20Acres', 'residentialParcels_Greaterthan20acres', 
-         'Williamson_Act_Parcels'],
+         'Williamson_Act_Parcels', 'ButteCountyBoundary'],
     'OpportunityAreas':
-        ['UrbanPermitAreas', 'ToxicContaminants', 'SolidWasteManagementFacility_OverlayZone', 'Conservation_Easements'],
+        ['UrbanPermitAreas', 'ToxicContaminants', 'SolidWasteManagementFacility_OverlayZone', 'Conservation_Easements', 'ButteCountyBoundary'],
     'OpportunityBuffers':
-        ['TransmissionLines', 'Substations']
+        ['TransmissionLines', 'Substations', 'ButteCountyBoundary']
 }
 
-backGroundLayer = 'ButteCountyBoundary'
+def delLayers(layerCfgs):
+    for layerName, featureNames in layerCfgs.items():
+        for featureName in featureNames:
+            arcpy.Delete_management(featureName)
+
+
+def scratchLayers(layerCfgs):
+    scratchLayerCfgs={}
+    for layerName, featureNames in layerCfgs.items():
+        newFeatureNames=[]
+        for featureName in featureNames:
+            scratchFeatureName='%s_%s'%(featureName, layerName)
+            print("Scratch Feature Name", scratchFeatureName)
+            arcpy.Delete_management(scratchFeatureName)
+            arcpy.CopyFeatures_management(featureName, scratchFeatureName)
+            newFeatureNames.append(scratchFeatureName)
+        scratchLayerCfgs[layerName]=newFeatureNames
+    return scratchLayerCfgs
 
 def mergeLayers(layerCfgs):
-    addFeatureNames([backGroundLayer, ])
     for layerName, featureNames in layerCfgs.items():
         print("Working on", layerName)
-        addFeatureNames(featureNames)
+        addFeatureNames(layerName, featureNames)
+
         fixLayers(featureNames)
 
         mergeFeatures = ";".join(featureNames)
-        mergeFeatures = '%s;%s' % (mergeFeatures, backGroundLayer)
 
         arcpy.Delete_management(layerName)
 
@@ -57,15 +76,14 @@ def mergeLayers(layerCfgs):
             else:
                 raise
 
-
 def fixLayers(featureSet):
 
     featureFields={}
     for feature in featureSet:
         featureFields[feature] = arcpy.ListFields(feature)
 
-    fixSpacedNone(featureFields)
-    print("SpacedNone Done")
+    #fixSpacedNone(featureFields)
+    #print("SpacedNone Done")
 
     print("Looking for type mismathes")
     typeMismatches = findTypeMismatches(featureFields)
@@ -136,19 +154,34 @@ def fixSpacedNone(featureFields):
 
                     cursor.updateRow(fixedRow)
 
-
-def addFeatureNames(featureNames):
+def addFeatureNames(layerName, featureNames):
     for featureName in featureNames:
-        print("Adding Feature Name", featureName)
+        print("Stripping", layerName, "From", featureName)
 
-        fieldVal='\"%s\"'%(featureName)
+        fieldVal='\"%s\"'% (re.sub('_' + layerName + '$', '', featureName))
+        print("Adding Feature Name", fieldVal)
+
         arcpy.management.AddField(featureName, 'FeatureName', 'TEXT', 64)
         arcpy.management.CalculateField(featureName, 'FeatureName', fieldVal)
 
+def modMergedField(featureName, modFeatureName, fieldName, value):
+    searchFields=["featureName", fieldName]
+    print(searchFields)
 
+    with arcpy.da.UpdateCursor(featureName, searchFields) as cursor:
+        for row in cursor:
+            if row[0] == modFeatureName:
+                updateRow=[row[0], value]
+                print("Fixing Row", fieldName)
+                cursor.updateRow(updateRow)
 
-mergeLayers(layerCfgs)
+workingLayersCfg = scratchLayers(layerCfgs)
+mergeLayers(workingLayersCfg)
+delLayers(workingLayersCfg)
 
+#This adds data for the rasture fields that will be used.
+modMergedField('ParcelSize', 'ButteCountyBoundary', 'ACRES', 0)
+modMergedField('ResidentialProximity', 'ButteCountyBoundary', 'DistRange', '4000 plus')
 
 
 
